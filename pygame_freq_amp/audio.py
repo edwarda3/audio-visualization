@@ -7,6 +7,7 @@ import numpy
 import time
 import pygame
 from tqdm import trange
+import math
 
 W = 1024
 H = 512
@@ -31,6 +32,8 @@ class Audio:
 
         self.preprocessFFT(wf)
         self.preprocessPoints(self.freq_data,self.amp_data)
+        self.exaggerate(self.pointList)
+        self.smoothPoints(self.pointList)
 
         self.init_pygame()
         self.start_audio_stream(wf,pa)
@@ -96,6 +99,44 @@ class Audio:
         sound.export(f,format='wav')
         return f
 
+    def exaggerate(self,points):
+        print("Heightening Peaks...")
+        newpoints = []
+        for t in trange(len(points)):
+            timeslice = points[t]
+            exslice = [0]*len(timeslice)
+            for s in range(len(timeslice)):
+                (l,t,w,h) = timeslice[s]
+                newh = max(h-165,0) * 4
+                exslice[s] = (l,H-newh,w,newh)
+            newpoints.append(exslice)
+        self.pointList = newpoints
+
+    def smoothPoints(self,points):
+        print("Applying smoothing...")
+        max_height_change = 5
+        newpoints = []
+        for t in trange(len(points)):
+            timeslice = points[t]
+            formattedslice = [0]*len(timeslice)
+            for h in range(len(timeslice)):
+                (o_left,o_top,o_w,o_h) = timeslice[h]
+                if(t > 0):
+                    (l_left,l_top,l_w,l_h) = newpoints[-1][h]
+                    heightdiff = o_h - l_h
+                    # heightdiff = min(max(heightdiff,-max_height_change),max_height_change)
+                    if(heightdiff != 0):
+                        heightdiff = math.sqrt(abs(heightdiff)) * (heightdiff/abs(heightdiff))
+                    new_h = l_h + int(heightdiff)
+                    newrect = (o_left,H-new_h,o_w,new_h)
+                    formattedslice[h] = newrect
+                else:
+                    newrect = timeslice[h]
+                    formattedslice[h] = newrect
+            newpoints.append(formattedslice)
+        self.pointList = newpoints
+
+
     # Converts a list of frequency data points into 2d points for pygame.
     # Change this function if a different visualization is desired.
     # Writes points into self.pointList as a 2-d array.
@@ -103,19 +144,24 @@ class Audio:
         print('Preprocessing Points...',file=sys.stderr)
         # Given a number (original frequency value generated from FFT), map it to fit the screen.
         def bound_and_scale(fnums,anums):
-                favg = sum([abs(n) for n in fnums])/len(fnums)
-                aavg = sum([abs(n) for n in anums])/len(anums)
-                f_approx_normalized = favg/70 #this can get way over 1, but most values should stay between 0-1
-                scale_to_screen = H * (f_approx_normalized * aavg)
+                favg = sum([abs(n) for n in fnums])/len(fnums)/8
+                if(favg > 2):
+                    favg = math.pow(favg,1/(favg-1))
+                aavg = .6 + 4*sum([abs(n) for n in anums])/len(anums)
+                # print('favg: {:.2f}, aavg: {:.2f}'.format(favg,aavg))
+                # f_approx_normalized = favg/10 #this can get way over 1, but most values should stay between 0-1
+                # scale_to_screen = (H/10) * (favg + aavg)
+                scale_to_screen = (H/10) * (favg * aavg)
                 bounded_amplitude = max(min(scale_to_screen,H),0)
                 return int(bounded_amplitude)
         self.pointList = []
 
         # Because we can't fit all points in the chunk to the screeb (unless big minitor), we reduce the output of the array. This is relative to the width of the window.
-        reduction_factor = (self.chunk_size//2) / W
+        reduction_factor = (self.chunk_size) / W
         rect_width = 15
         width = int(reduction_factor * rect_width)
         # print("rf: {}, rw: {}, w: {}".format(reduction_factor,rect_width,width))
+        # print('---')
 
         for i in trange(freqdata.shape[0]):
             fdata = freqdata[i,:]
@@ -153,8 +199,8 @@ class Audio:
         self.chunk_size = 4096 #Assumption, because a good way to read the chunk size is not in the wave library (afaik).
         self.w_chunks_count = int(len(w_data)/self.chunk_size)
         # Preallocate memory to make this faster. We allocate #chunks rows, and half the chunksize for each chunk. This is because FFT data is symmetric, so we only need the first half
-        self.freq_data = numpy.zeros((self.w_chunks_count,self.chunk_size//2)) 
-        self.amp_data = numpy.zeros((self.w_chunks_count,self.chunk_size//2)) 
+        self.freq_data = numpy.zeros((self.w_chunks_count,self.chunk_size)) 
+        self.amp_data = numpy.zeros((self.w_chunks_count,self.chunk_size)) 
         #Go through each chunk and preform FFT.
         for i in trange(self.w_chunks_count):
             chunk_start_index = i     * self.chunk_size
@@ -163,8 +209,10 @@ class Audio:
             chunk_data = [int(d)/255 for d in w_data[chunk_start_index : chunk_stop_index]]
             #fft_out = [f.real + f.imag for f in fft(chunk_data)]
             fft_out = [f.real for f in fft(chunk_data)]
-            self.freq_data[i,:] = fft_out[:len(fft_out)//2]
-            self.amp_data[i,:] = [chunk_data[r*2]+chunk_data[r*2+1] for r in range(len(chunk_data)//2)]
+            # self.freq_data[i,:] = fft_out[:len(fft_out)//2]
+            self.freq_data[i,:] = fft_out
+            # self.amp_data[i,:] = [chunk_data[r*2]+chunk_data[r*2+1] for r in range(len(chunk_data)//2)]
+            self.amp_data[i,:] = chunk_data
 
 # Prints timing of the audio file. The times are in seconds
 def printer(curtime,totaltime):
