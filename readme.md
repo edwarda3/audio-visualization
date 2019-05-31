@@ -1,8 +1,8 @@
-#Audio Visualization
+# Audio Visualization
 
 ---
 
-##Frequency and Amplitude using Pygame
+## Frequency and Amplitude using Pygame
 
 The file `pygame_freq_amp/audio.py` script will use pygame to create audio visualizations based on frequency data and amplitude data.
 
